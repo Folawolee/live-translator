@@ -1,31 +1,35 @@
+# backend/app/asr.py
+from faster_whisper import WhisperModel   # ← this is correct
 import numpy as np
-import whisper
 
-# Load model once (VERY important)
 _model = None
 
 def get_model():
     global _model
     if _model is None:
-        print("Loading Whisper model...")
-        _model = whisper.load_model("base")  # start small
+        print("Loading faster-whisper model (medium)...")
+        _model = WhisperModel(
+            "medium",
+            device="cpu",
+            compute_type="int8"
+        )
     return _model
 
-
 def transcribe_audio(audio_np: np.ndarray) -> str:
-    """
-    audio_np: float32 numpy array, mono, 16kHz
-    """
-    if audio_np is None or len(audio_np) == 0:
-        return ""
-
     model = get_model()
-
-    # Whisper expects float32 numpy array
-    result = model.transcribe(
-        audio_np,
-        language="en",       # later change / auto-detect
-        fp16=False
-    )
-
-    return result.get("text", "").strip()
+    try:
+        segments, info = model.transcribe(
+            audio_np,
+            language="en",
+            vad_filter=False,
+            beam_size=5
+        )
+        text = " ".join(
+            segment.text.strip()
+            for segment in segments
+            if segment.text and segment.text.strip()
+        )
+        return text
+    except Exception as e:
+        print(f"Transcription failed: {e}")
+        return ""
