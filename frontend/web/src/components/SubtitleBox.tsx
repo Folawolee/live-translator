@@ -29,10 +29,11 @@ export default function SubtitleBox({ transcript }: SubtitleBoxProps) {
 
         .transcript-content {
           background: #19192c;
-          color: #333;
-          min-height: 300px;
+          color: #FFFFFF;
+          min-height: 500px;
+          max-height: 65vh;
           padding: 1.5rem;
-          border-radius: 12px;
+          border-radius: 20px;
           overflow-y: auto;
           font-size: 1.1rem;
           line-height: 1.6;
@@ -41,7 +42,14 @@ export default function SubtitleBox({ transcript }: SubtitleBoxProps) {
 
         .line { margin-bottom: 0.75rem; }
 
-        .placeholder { color: #FFFFFF; font-style: italic; }
+        .placeholder {
+          color: #FFFFFF;
+          font-style: italic;
+          font-size: 1.3rem;  /* slightly larger for the taller box */
+          text-align: center;
+          line-height: 1.6;
+        }
+
       `}</style>
     </div>
   );

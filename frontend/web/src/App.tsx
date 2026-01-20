@@ -2,6 +2,7 @@
 import { useState, useRef } from 'react';
 import SubtitleBox from './components/SubtitleBox';
 import LanguageSelector from './components/LanguageSelector';
+import logo from './assets/logo.png'; // or logo.svg
 
 function App() {
   const [status, setStatus] = useState<string>('Ready');
@@ -12,16 +13,19 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const shouldStopRef = useRef<boolean>(false);
 
+
+  /** Connect or reconnect WebSocket */
   const connectWebSocket = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+
     const ws = new WebSocket('ws://127.0.0.1:8000/ws');
 
     ws.onopen = () => {
       setStatus('Connected');
+      // Send current language on connect
       ws.send(JSON.stringify({ type: 'set_language', language: selectedLanguage }));
     };
 
@@ -40,66 +44,89 @@ function App() {
 
     ws.onerror = () => setStatus('Connection error');
     ws.onclose = () => setStatus('Disconnected');
+
     wsRef.current = ws;
   };
 
+  /** Handle language changes */
+  const handleLanguageChange = (lang: string) => {
+    setSelectedLanguage(lang);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'set_language', language: lang }));
+    }
+  };
+
+  /** Start recording audio and sending to WS */
   const startRecording = async () => {
-    shouldStopRef.current = false;
-    setIsRecording(true);
-    setStatus('Recording...');
+  setIsRecording(true);
+  setStatus('Recording...');
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
+  connectWebSocket();
 
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    const audioContext = new AudioContextClass({ sampleRate: 16000 });
-    audioContextRef.current = audioContext;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  streamRef.current = stream;
 
-    const source = audioContext.createMediaStreamSource(stream);
-    sourceRef.current = source;
+  const AudioContextClass =
+    window.AudioContext || (window as any).webkitAudioContext;
 
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    processor.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0);
-      const buffer = new ArrayBuffer(inputData.length * 4);
-      const view = new DataView(buffer);
-      for (let i = 0; i < inputData.length; i++) view.setFloat32(i * 4, inputData[i], true);
-      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(buffer);
-    };
+  const audioContext = new AudioContextClass({ sampleRate: 16000 });
+  audioContextRef.current = audioContext;
 
-    processorRef.current = processor;
-    source.connect(processor);
-    processor.connect(audioContext.destination);
+  // IMPORTANT: load worklet
+  await audioContext.audioWorklet.addModule(
+    new URL('./audio-processor.ts', import.meta.url)
+  );
 
-    connectWebSocket();
+  const source = audioContext.createMediaStreamSource(stream);
+  sourceRef.current = source;
+
+  const workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+  workletNodeRef.current = workletNode;
+
+  workletNode.port.onmessage = (event) => {
+    const inputData = event.data as Float32Array;
+
+    const buffer = new ArrayBuffer(inputData.length * 4);
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < inputData.length; i++) {
+      view.setFloat32(i * 4, inputData[i], true);
+    }
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(buffer);
+    }
   };
 
+  source.connect(workletNode);
+};
+
+
+  /** Stop recording and close everything */
   const stopRecording = () => {
-    shouldStopRef.current = true;
-    setIsRecording(false);
-    setStatus('Stopped');
+  setIsRecording(false);
+  setStatus('Stopped');
 
-    streamRef.current?.getTracks().forEach(track => track.stop());
-    sourceRef.current?.disconnect();
-    processorRef.current?.disconnect();
-    audioContextRef.current?.close();
+  streamRef.current?.getTracks().forEach(track => track.stop());
+  sourceRef.current?.disconnect();
+  workletNodeRef.current?.disconnect();
+  audioContextRef.current?.close();
 
-    wsRef.current?.close();
+  wsRef.current?.close();
 
-    streamRef.current = null;
-    sourceRef.current = null;
-    processorRef.current = null;
-    audioContextRef.current = null;
-    wsRef.current = null;
-  };
+  streamRef.current = null;
+  sourceRef.current = null;
+  workletNodeRef.current = null;
+  audioContextRef.current = null;
+  wsRef.current = null;
+};
+
 
   return (
     <div className="app-container">
       <header className="header">
         <div className="logo-container">
-          <div className="logo-placeholder"></div>
-          <h1 className="title">VoxBridge</h1>
-          <p className="tagline">Connect. Understand.</p>
+          <img src={logo} alt="VoxBridge Logo" className="logo-img" />
         </div>
       </header>
 
@@ -113,10 +140,14 @@ function App() {
           <button onClick={stopRecording} disabled={!isRecording}>Stop</button>
         </div>
         <div className="language-selector-wrapper">
-          <LanguageSelector onLanguageChange={setSelectedLanguage} disabled={isRecording} />
+          <LanguageSelector
+            onLanguageChange={handleLanguageChange}
+            disabled={isRecording}
+          />
         </div>
       </div>
 
+      {/* Styling kept intact */}
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -127,14 +158,11 @@ function App() {
           align-items: center;
           padding: 2rem;
           font-family: 'Segoe UI', system-ui, sans-serif;
-          background: #0D1321; /* darker blue background */
+          background: #0D1321;
           color: #FFF;
         }
 
-        .header {
-          text-align: center;
-          margin-bottom: 2rem;
-        }
+        .header { text-align: center; margin-bottom: 2rem; }
 
         .logo-container {
           display: flex;
@@ -143,24 +171,7 @@ function App() {
           gap: 0.5rem;
         }
 
-        .logo-placeholder {
-          width: 100px;
-          height: 100px;
-          background: #1B3B6F; /* warm accent blue */
-          border-radius: 16px;
-          margin-bottom: 0.5rem;
-        }
-
-        .title {
-          font-size: 2.8rem;
-          font-weight: 700;
-        }
-
-        .tagline {
-          font-size: 1.3rem;
-          opacity: 0.85;
-          color: #A4B0BE;
-        }
+        .logo-img { width: 300px; height: auto; margin-bottom: 1rem; }
 
         .status-bar {
           background: rgba(255,255,255,0.05);
@@ -181,11 +192,7 @@ function App() {
           justify-content: center;
         }
 
-        .button-group {
-          display: flex;
-          gap: 1rem; /* space between buttons */
-        }
-
+        .button-group { display: flex; gap: 1rem; }
         .button-group button {
           padding: 0.75rem 2.2rem;
           border-radius: 12px;
@@ -195,25 +202,16 @@ function App() {
           font-size: 1rem;
           transition: transform 0.2s ease, background 0.3s ease;
           color: #fff;
-          min-width: 140px; /* make buttons same width */
+          min-width: 140px;
         }
-
         .button-group button:hover:not(:disabled) { transform: translateY(-2px); }
         .button-group button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .button-group button:first-child { background: #1B3B6F; }
+        .button-group button:last-child { background: #576574; }
 
-        .button-group button:first-child { background: #1B3B6F; }  /* start button */
-        .button-group button:last-child { background: #576574; }  /* stop button */
+        .language-selector-wrapper { min-width: 150px; }
 
-        .language-selector-wrapper {
-          min-width: 150px; /* smaller dropdown */
-        }
-
-        /* Make SubtitleBox span longer */
-        .subtitle-container {
-          width: 90%;
-          max-width: 1100px;
-          margin-bottom: 1.5rem;
-        }
+        .subtitle-container { width: 90%; max-width: 1100px; margin-bottom: 1.5rem; }
 
         @media (max-width: 768px) {
           .controls { flex-direction: column; gap: 1rem; }
