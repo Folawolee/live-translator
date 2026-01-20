@@ -1,13 +1,16 @@
 # backend/app/asr.py
-from faster_whisper import WhisperModel   # ← this is correct
+from faster_whisper import WhisperModel
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 _model = None
 
 def get_model():
     global _model
     if _model is None:
-        print("Loading faster-whisper model (medium)...")
+        logger.info("Loading faster-whisper model (medium)...")
         _model = WhisperModel(
             "medium",
             device="cpu",
@@ -15,21 +18,23 @@ def get_model():
         )
     return _model
 
-def transcribe_audio(audio_np: np.ndarray) -> str:
+def transcribe_audio(audio_np: np.ndarray, language: str = "en") -> str:
     model = get_model()
     try:
         segments, info = model.transcribe(
             audio_np,
-            language="en",
+            language=language,
             vad_filter=False,
-            beam_size=5
+            beam_size=1,
+            without_timestamps=True
         )
         text = " ".join(
             segment.text.strip()
             for segment in segments
             if segment.text and segment.text.strip()
         )
+        logger.info(f"Raw transcription result: '{text}'")
         return text
     except Exception as e:
-        print(f"Transcription failed: {e}")
+        logger.error(f"Transcription failed: {e}")
         return ""

@@ -1,27 +1,48 @@
-import React from "react";
+// src/components/SubtitleBox.tsx
+import { useRef, useEffect } from 'react';
 
-type Props = {
-  text: string;
-};
+interface SubtitleBoxProps {
+  transcript: string;
+}
 
-const SubtitleBox: React.FC<Props> = ({ text }) => {
+export default function SubtitleBox({ transcript }: SubtitleBoxProps) {
+  const outputRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [transcript]);
+
   return (
-    <div
-      style={{
-        backgroundColor: "#000",
-        color: "#fff",
-        padding: "24px",
-        fontSize: "2rem",
-        width: "100%",
-        minHeight: "120px",
-        textAlign: "center",
-        borderRadius: "8px",
-        overflowWrap: "break-word",
-      }}
-    >
-      {text || "Waiting for speech..."}
+    <div className="subtitle-container">
+      <div ref={outputRef} className="transcript-content">
+        {transcript ? transcript.split('\n').map((line, idx) => (
+          <p key={idx} className="line">{line}</p>
+        )) : <p className="placeholder">Waiting for speech...</p>}
+      </div>
+
+      <style>{`
+        .subtitle-container {
+          width: 90%;
+          max-width: 1200px;
+          margin-bottom: 2rem;
+        }
+
+        .transcript-content {
+          background: #19192c;
+          color: #333;
+          min-height: 300px;
+          padding: 1.5rem;
+          border-radius: 12px;
+          overflow-y: auto;
+          font-size: 1.1rem;
+          line-height: 1.6;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .line { margin-bottom: 0.75rem; }
+
+        .placeholder { color: #FFFFFF; font-style: italic; }
+      `}</style>
     </div>
   );
-};
-
-export default SubtitleBox;
+}
